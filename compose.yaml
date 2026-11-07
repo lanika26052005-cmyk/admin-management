@@ -1,0 +1,155 @@
+
+services:
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: admin-node-exporter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+    networks:
+      - admin-network
+
+  frontend:
+    image: admin-frontend:v3
+    container_name: admin-frontend-app
+    restart: unless-stopped
+    expose:
+      - "3000"
+    networks:
+      - admin-network
+
+  backend:
+    image: admin-backend:v3
+    container_name: admin-backend-app
+    restart: unless-stopped
+    expose:
+      - "8080"
+    networks:
+      - admin-network
+
+  nginx:
+    image: nginx:latest
+    container_name: admin-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - admin-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: admin-prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    networks:
+      - admin-network
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: admin-cadvisor
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8085:8080"
+    volumes:
+      - "/:/rootfs:ro"
+      - "/var/run:/var/run:ro"
+      - "/sys:/sys:ro"
+      - "/var/lib/docker:/var/lib/docker:ro"
+      - "/dev/disk:/dev/disk:ro"
+    privileged: true
+    devices:
+      - "/dev/kmsg"
+    networks:
+      - admin-network
+
+  loki:
+    image: grafana/loki:3.5.0
+    container_name: admin-loki
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/loki/config.yml"
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    networks:
+      - admin-network
+
+  promtail:
+    image: grafana/promtail:3.5.0
+    container_name: admin-promtail
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/promtail/config.yml"
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - promtail-data:/tmp
+    depends_on:
+      - loki
+    networks:
+      - admin-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: admin-grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: CHANGE_TO_YOUR_OWN_STRONG_PASSWORD
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - admin-network
+
+  jenkins:
+    image: jenkins/jenkins:lts-jdk21
+    container_name: admin-jenkins
+    restart: unless-stopped
+    user: root
+    ports:
+      - "8080:8080"
+    volumes:
+      - jenkins-data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - admin-network
+
+volumes:
+  prometheus-data:
+  loki-data:
+  promtail-data:
+  grafana-data:
+  jenkins-data:
+
+networks:
+  admin-network:
+    external: true
+    name: admin-network
